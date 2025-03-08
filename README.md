@@ -29,8 +29,8 @@ The Crime News API allows you to retrieve news articles based on a specific loca
 1.  Clone the repository:
 
     ```bash
-    git clone <repository_url>
-    cd <repository_directory>
+    git clone https://github.com/RJBOGA/newsapi.git
+    cd newsapi
     ```
 
 2.  Create a virtual environment (recommended):
