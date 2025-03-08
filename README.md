@@ -135,17 +135,6 @@ The Crime News API allows you to retrieve news articles based on a specific loca
     ```
     GET /news/zipcode/10001/filtered_sentiment
     ```
-
-## Swagger Documentation
-
-The API includes Swagger/OpenAPI documentation, which allows you to explore the API endpoints and their parameters in an interactive interface.
-
-1.  Run the Flask application (see [Running the Application](#running-the-application)).
-
-2.  Open your web browser and go to `http://127.0.0.1:5000/apidocs` (or the address where your Flask app is running).
-
-3.  You should see the Swagger UI, which provides an interactive documentation for your API.
-
 ## Example Usage
 
 Here's an example of how you can use the API to retrieve filtered news articles with sentiment analysis for a specific zipcode using `curl`:
