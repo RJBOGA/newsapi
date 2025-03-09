@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # Import the CORS library
 import re
 import os
 from dotenv import load_dotenv
@@ -10,15 +11,16 @@ from bs4 import BeautifulSoup
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize, PunktSentenceTokenizer  # Import PunktSentenceTokenizer
+from nltk.tokenize import word_tokenize
 import logging
-import shutil  # Import the shutil module
+import shutil
 import nltk
 nltk.download('punkt_tab')
 
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})  # Enable CORS for all routes, restrict origin
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -72,19 +74,6 @@ except LookupError:
     logging.info("Downloading punkt...")
     nltk.download('punkt')
 
-
-# THIS IS THE NEW SECTION TO CLEAR OUT NLTK DATA
-nltk_data_path = nltk.data.path[0]  # Assumes the first path is the main one
-punkt_path = os.path.join(nltk_data_path, 'tokenizers', 'punkt')  # path to punkt
-
-try:
-    if os.path.exists(punkt_path):
-        logging.warning(f"Deleting punkt directory: {punkt_path}")
-        shutil.rmtree(punkt_path)  # Delete the directory and all its contents
-    else:
-        logging.info("Punkt directory not found. Skipping deletion.")
-except Exception as e:
-    logging.error(f"Error deleting punkt directory: {e}")
 
 def is_valid_zipcode(zipcode):
     """Validates a US zipcode format."""
@@ -142,15 +131,7 @@ def clean_text(text):
         text = text.lower()
         stop_words = set(stopwords.words('english'))
 
-        # Load PunktSentenceTokenizer explicitly
-        try:
-            sent_tokenizer = PunktSentenceTokenizer()
-        except Exception as e:
-            logging.error(f"Error loading PunktSentenceTokenizer: {e}")
-            return ""
-
-        word_tokens = word_tokenize(text,  # Pass the text
-                                   )  # Ensure punkt is used
+        word_tokens = word_tokenize(text)
         filtered_text = [w for w in word_tokens if not w in stop_words]
         return " ".join(filtered_text)
     except Exception as e:
@@ -217,6 +198,97 @@ def news_filtered_sentiment(zipcode):
 
     city = location_info["city"]
     news_articles = get_news_articles(city)
+    if not news_articles:
+        return jsonify({"error": "Could not retrieve news articles"}), 500
+
+    keywords = ["crime", "violence", "accident", "death", "murder", "assault", "robbery", "shooting", "crash", "injury", "fatal", "killed", "victim", "police", "arrest", "investigation", "homicide"]
+
+    filtered_articles = []
+    try:
+        sid = SentimentIntensityAnalyzer()
+    except Exception as e:
+        logging.error(f"Error initializing SentimentIntensityAnalyzer: {e}")
+        return jsonify({"error": "Failed to initialize sentiment analyzer"}), 500
+    total_sentiment = 0
+    article_count = 0
+
+    for article in news_articles:
+        try:
+            description = article.get('description', '')
+            title = article.get('title', '')
+            combined_text = f"{title} {description}"  # Combine title and description
+            cleaned_text = clean_text(combined_text)
+
+            # Check for keywords (case-insensitive)
+            if any(keyword in cleaned_text for keyword in keywords):
+                sentiment_scores = sid.polarity_scores(cleaned_text)
+                compound_sentiment = sentiment_scores['compound']
+
+                filtered_article = {
+                    "title": article.get('title'),
+                    "description": article.get('description'),
+                    "content": article.get('content'),
+                    "url": article.get('url'),
+                    "publishedAt": article.get('publishedAt'),
+                    "sentiment_score": compound_sentiment,
+                    "source": article.get('source')
+                }
+                filtered_articles.append(filtered_article)
+                total_sentiment += compound_sentiment
+                article_count += 1
+
+        except Exception as e:
+            logging.error(f"Error processing article: {e}")
+            continue  # Skip the error and continue processing articles.
+
+    average_sentiment = total_sentiment / article_count if article_count > 0 else 0
+
+    response_data = {
+        "articles": filtered_articles,
+        "average_sentiment": average_sentiment
+    }
+
+    logging.info(f"Returning {len(filtered_articles)} filtered articles with average sentiment: {average_sentiment}")
+    return jsonify(response_data)
+
+@app.route('/news/geo/<latitude>/<longitude>/filtered_sentiment')
+def news_geo_filtered_sentiment(latitude, longitude):
+    """
+    GET /news/geo/<latitude>/<longitude>/filtered_sentiment
+    Returns news articles filtered by keywords related to crime, violence, etc.,
+    with sentiment analysis, based on latitude and longitude.
+    """
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except ValueError:
+        return jsonify({"error": "Invalid latitude or longitude format"}), 400
+
+    # Basic validation for latitude and longitude ranges
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return jsonify({"error": "Latitude must be between -90 and 90, and longitude between -180 and 180"}), 400
+
+    # Find the closest city (this is a very basic approach)
+    closest_city = None
+    min_distance = float('inf')  # Initialize with a very large number
+
+    for zipcode, data in us_zip_data.items():
+        try:
+            city_latitude = float(data["latitude"])
+            city_longitude = float(data["longitude"])
+            # A simple distance calculation (can be improved with more accurate methods)
+            distance = (latitude - city_latitude)**2 + (longitude - city_longitude)**2
+            if distance < min_distance:
+                min_distance = distance
+                closest_city = data["city"]
+        except (ValueError, KeyError) as e:
+            logging.warning(f"Skipping zipcode {zipcode} due to error: {e}")
+            continue  # Skip to the next zipcode
+
+    if not closest_city:
+        return jsonify({"error": "Could not determine closest city"}), 404
+
+    news_articles = get_news_articles(closest_city)
     if not news_articles:
         return jsonify({"error": "Could not retrieve news articles"}), 500
 
